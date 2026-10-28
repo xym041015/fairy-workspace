@@ -1,0 +1,1 @@
+(() => { const el = document.querySelector('[data-dsh-fairy-voice-control]'); if (!el) return JSON.stringify({ error: 'no control' }); const r = el.getBoundingClientRect(); return JSON.stringify({ x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2), label: el.getAttribute('aria-label'), pressed: el.getAttribute('aria-pressed'), cls: el.className }); })()

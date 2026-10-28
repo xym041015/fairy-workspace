@@ -1,0 +1,21 @@
+packages:
+  - .
+
+nodeLinker: hoisted
+autoInstallPeers: false
+minimumReleaseAgeExclude:
+  - dshmarket@1.18.0
+  - '@nanmicoder/dsh-agent-teams@0.1.11'
+allowBuilds:
+  cloudflared: true
+  cpu-features: true
+  node-pty: true
+  ssh2: true
+
+# 显式关闭 pnpm 24h 发布年龄门控:DSH 生态插件常当天发布,
+# 默认 minimumReleaseAge=1440 会拦截刚发布的 @linxin666 等依赖。
+minimumReleaseAge: 0
+
+# >>> fairy-dsh (template adoption 2026-09-18): pnpm v12 reads settings here
+# dsh-reasoning-effort patch removed 2026-10-02: plugin dropped on dsh 0.2.0
+# upgrade (no 0.2.0-compatible release yet; restore from package.json.bak-pre-dsh-0.2.0).

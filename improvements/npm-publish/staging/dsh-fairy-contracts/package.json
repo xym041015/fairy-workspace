@@ -1,0 +1,22 @@
+{
+  "name": "dsh-fairy-contracts",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./index.js",
+    "./client-dom": "./client-dom.cjs",
+    "./client-diagnostics": "./client-diagnostics.cjs",
+    "./diagnostics": "./diagnostics.js",
+    "./types": "./types.d.ts"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "README.md",
+    "diagnostics.js",
+    "client-diagnostics.cjs",
+    "index.js",
+    "client-dom.cjs"
+  ]
+}

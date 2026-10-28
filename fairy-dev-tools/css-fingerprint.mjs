@@ -1,0 +1,11 @@
+import { createHash } from 'node:crypto';
+import { injectStyles } from '/Users/xuzhouping/Desktop/开发者/fairy deepseek开发/Fairy-DSH/fairy-visual/dsh-fairy-visual/src/client/style.js';
+const originalDocument = globalThis.document;
+const nodes = new Map();
+globalThis.document = { getElementById: (id) => nodes.get(id) || null, createElement: () => ({ id: '', textContent: '', setAttribute() {} }), head: { appendChild: (n) => nodes.set(n.id, n) }, documentElement: null };
+injectStyles();
+const [style] = nodes.values();
+console.log('bytes', Buffer.byteLength(style.textContent));
+console.log('sha256', createHash('sha256').update(style.textContent).digest('hex'));
+console.log('has-modal-rules', style.textContent.includes('data-dsh-fairy-modal-open] .dsh-fairy-stage'));
+globalThis.document = originalDocument;

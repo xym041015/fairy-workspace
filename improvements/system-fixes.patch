@@ -1,0 +1,172 @@
+diff --git a/balance-meter/dsh-balance-meter/lib/index.js b/balance-meter/dsh-balance-meter/lib/index.js
+index 61c134a..c4f2957 100644
+--- a/balance-meter/dsh-balance-meter/lib/index.js
++++ b/balance-meter/dsh-balance-meter/lib/index.js
+@@ -86,10 +86,44 @@ const PRICING_MODEL = 'deepseek-v4-flash';
+ const PRICING_VERSION = 'deepseek-v4-flash-2026-08-26';
+ const PRICING_VERIFIED_DATE = '2026-08-26';
+ const PRICING_SOURCE_URL = 'https://api-docs.deepseek.com/quick_start/pricing/';
+-const USD_TO_CNY_ESTIMATE = 7.2;
++const PRICING_OVERRIDE_FILE = join(DSH_HOME, 'balance-meter', 'pricing.json');
++
++/**
++ * Optional pricing overrides ($DSH_HOME/balance-meter/pricing.json):
++ *   { "usdToCnyEstimate": 7.3, "usdPerMillion": { "offPeak": { "cacheHit": …, "cacheMiss": …, "output": … }, "peak": { … } } }
++ * Every field is optional; invalid numbers fall back to the built-in defaults so
++ * a stale or partial override file can never zero out the cost estimate.
++ */
++export function readPricingOverride(path = PRICING_OVERRIDE_FILE) {
++  let raw;
++  try {
++    raw = JSON.parse(readFileSync(path, 'utf8'));
++  } catch {
++    return { usdToCnyEstimate: undefined, usdPerMillion: { offPeak: {}, peak: {} } };
++  }
++  const band = (name) => (raw?.usdPerMillion && typeof raw.usdPerMillion[name] === 'object' ? raw.usdPerMillion[name] : {});
++  const rate = (container, key) => {
++    const value = Number(container?.[key]);
++    return Number.isFinite(value) && value > 0 ? value : undefined;
++  };
++  const usdToCny = Number(raw?.usdToCnyEstimate);
++  return {
++    usdToCnyEstimate: Number.isFinite(usdToCny) && usdToCny > 0 ? usdToCny : undefined,
++    usdPerMillion: {
++      offPeak: { cacheHit: rate(band('offPeak'), 'cacheHit'), cacheMiss: rate(band('offPeak'), 'cacheMiss'), output: rate(band('offPeak'), 'output') },
++      peak: { cacheHit: rate(band('peak'), 'cacheHit'), cacheMiss: rate(band('peak'), 'cacheMiss'), output: rate(band('peak'), 'output') },
++    },
++  };
++}
++
++const PRICING_OVERRIDE = readPricingOverride();
++const ENV_USD_TO_CNY = Number(process.env.DSH_FAIRY_USD_CNY);
++const USD_TO_CNY_ESTIMATE = Number.isFinite(ENV_USD_TO_CNY) && ENV_USD_TO_CNY > 0
++  ? ENV_USD_TO_CNY
++  : PRICING_OVERRIDE.usdToCnyEstimate ?? 7.2;
+ const USD_PER_MILLION = Object.freeze({
+-  offPeak: Object.freeze({ cacheHit: 0.007, cacheMiss: 0.22, output: 0.66 }),
+-  peak: Object.freeze({ cacheHit: 0.014, cacheMiss: 0.44, output: 1.32 }),
++  offPeak: Object.freeze({ cacheHit: 0.007, cacheMiss: 0.22, output: 0.66, ...PRICING_OVERRIDE.usdPerMillion.offPeak }),
++  peak: Object.freeze({ cacheHit: 0.014, cacheMiss: 0.44, output: 1.32, ...PRICING_OVERRIDE.usdPerMillion.peak }),
+ });
+ 
+ export function pricingBandForDate(date = new Date()) {
+diff --git a/balance-meter/dsh-balance-meter/test/contract.test.js b/balance-meter/dsh-balance-meter/test/contract.test.js
+index 609e870..142d898 100644
+--- a/balance-meter/dsh-balance-meter/test/contract.test.js
++++ b/balance-meter/dsh-balance-meter/test/contract.test.js
+@@ -109,6 +109,30 @@ test('uses the official V4 Flash UTC peak/off-peak schedule and rates', async ()
+   assert.equal(runtime.estimateUsageUsd(usage, new Date('2026-08-26T05:00:00Z')), 0.007 + 0.22 + 0.66);
+ });
+ 
++test('pricing overrides stay optional, per-field, and fail safe to defaults', async () => {
++  const { mkdtempSync, mkdirSync, writeFileSync, rmSync } = await import('node:fs');
++  const { join } = await import('node:path');
++  const { tmpdir } = await import('node:os');
++  const runtime = await import(new URL(`../lib/index.js?pricing-override-test=${Date.now()}`, import.meta.url));
++  const home = mkdtempSync(join(tmpdir(), 'balance-pricing-'));
++  try {
++    const overrideFile = join(home, 'balance-meter', 'pricing.json');
++    mkdirSync(join(home, 'balance-meter'), { recursive: true });
++    assert.deepEqual(runtime.readPricingOverride(overrideFile), { usdToCnyEstimate: undefined, usdPerMillion: { offPeak: {}, peak: {} } });
++    writeFileSync(overrideFile, JSON.stringify({ usdToCnyEstimate: 7.5, usdPerMillion: { peak: { cacheMiss: 0.5 }, unknown: true } }));
++    const override = runtime.readPricingOverride(overrideFile);
++    assert.equal(override.usdToCnyEstimate, 7.5);
++    assert.equal(override.usdPerMillion.peak.cacheMiss, 0.5);
++    assert.equal(override.usdPerMillion.offPeak.cacheHit, undefined);
++    writeFileSync(overrideFile, JSON.stringify({ usdToCnyEstimate: -3, usdPerMillion: { offPeak: { cacheHit: 'x' } }, junk: [1] }));
++    const invalid = runtime.readPricingOverride(overrideFile);
++    assert.equal(invalid.usdToCnyEstimate, undefined);
++    assert.equal(invalid.usdPerMillion.offPeak.cacheHit, undefined);
++  } finally {
++    rmSync(home, { recursive: true, force: true });
++  }
++});
++
+ test('suspends and resumes one visible-page balance request without retaining listeners', () => {
+   const match = client.match(/function createBalancePoller\(setData, sessions\) \{[\s\S]*?\n    \}\n\n    function BalanceMeter/);
+   assert.ok(match, 'balance poller source is available');
+diff --git a/fairy-system/check.sh b/fairy-system/check.sh
+index e1b33e7..d847f9e 100755
+--- a/fairy-system/check.sh
++++ b/fairy-system/check.sh
+@@ -37,8 +37,14 @@ node --check "$DSH_ROOT/fairy-startup/dsh-fairy-startup/lib/index.js"
+ node --check "$DSH_ROOT/fairy-startup/dsh-fairy-startup/lib/client.js"
+ node --check "$DSH_ROOT/fairy-voice/dsh-fairy-voice/lib/index.js"
+ node --check "$DSH_ROOT/fairy-voice/dsh-fairy-voice/lib/client.js"
+-node --check "$DSH_ROOT/.agent-presets/fairy/runtime/index.js"
+-node --check "$DSH_ROOT/.agent-presets/fairy/runtime/compiler.js"
++# .agent-presets/fairy is private and does not ship with the public repository;
++# its gates only apply when the owner supplies the assets locally (see A10).
++if [[ -f "$DSH_ROOT/.agent-presets/fairy/runtime/index.js" ]]; then
++  node --check "$DSH_ROOT/.agent-presets/fairy/runtime/index.js"
++  node --check "$DSH_ROOT/.agent-presets/fairy/runtime/compiler.js"
++else
++  echo "-- .agent-presets/fairy 不存在（私有资产未提供），跳过其语法/测试门"
++fi
+ node --check "$ROOT/preflight-build.js"
+ node --check "$ROOT/upgrade-preflight.js"
+ node --check "$ROOT/accepted-baseline.js"
+@@ -67,8 +73,10 @@ fi
+ # verify.js owns cross-module/static/live contracts only. Package tests run once
+ # below so the complete check has one deterministic owner for every test suite.
+ node "$ROOT/verify.js" --live
+-python3 "$DSH_ROOT/.agent-presets/fairy/runtime/test_fairy_core.py"
+-node --test "$DSH_ROOT/.agent-presets/fairy/runtime"/test_*.mjs
++if [[ -f "$DSH_ROOT/.agent-presets/fairy/runtime/index.js" ]]; then
++  python3 "$DSH_ROOT/.agent-presets/fairy/runtime/test_fairy_core.py"
++  node --test "$DSH_ROOT/.agent-presets/fairy/runtime"/test_*.mjs
++fi
+ node --test "$DSH_ROOT/balance-meter/dsh-balance-meter/test"/*.test.js
+ node --test "$DSH_ROOT/browser-dock/dsh-browser-dock/test"/*.test.js
+ node --test "$DSH_ROOT/fairy-visual/dsh-fairy-visual/test"/*.test.js
+diff --git a/fairy-system/preflight-build.js b/fairy-system/preflight-build.js
+index 40fc7d4..4691d66 100644
+--- a/fairy-system/preflight-build.js
++++ b/fairy-system/preflight-build.js
+@@ -13,9 +13,15 @@ const path = require('node:path');
+ const DEFAULT_OFFICIAL_DSH_PACKAGE = path.join(os.homedir(), '.local/lib/node_modules/@deepseek-ai/dsh/package.json');
+ const DEFAULT_OFFICIAL_RUNTIME = path.join(os.homedir(), '.local/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-runtime/lib/client.js');
+ 
++// The approved pin describes the maintainer release machine. A different local
++// DSH install can be accepted explicitly, without editing this file, through
++// DSH_APPROVED_DSH_VERSION + DSH_APPROVED_RUNTIME_SHA256 (both must be set
++// together — accepting a version without its runtime hash fails closed).
++const ENV_APPROVED_DSH_VERSION = process.env.DSH_APPROVED_DSH_VERSION || '';
++const ENV_APPROVED_RUNTIME_SHA256 = process.env.DSH_APPROVED_RUNTIME_SHA256 || '';
+ const APPROVED = Object.freeze({
+-  dshVersion: '0.1.1-rc.2',
+-  runtimeSha256: '13a5fe0ee8cddda2306d302eb0dbfdd601e96d14baeb512867b4b6d1d72f6679',
++  dshVersion: ENV_APPROVED_DSH_VERSION && ENV_APPROVED_RUNTIME_SHA256 ? ENV_APPROVED_DSH_VERSION : '0.1.1-rc.2',
++  runtimeSha256: ENV_APPROVED_DSH_VERSION && ENV_APPROVED_RUNTIME_SHA256 ? ENV_APPROVED_RUNTIME_SHA256 : '13a5fe0ee8cddda2306d302eb0dbfdd601e96d14baeb512867b4b6d1d72f6679',
+   locks: Object.freeze({
+     'dsh-message-edit': Object.freeze({
+       version: '0.2.3',
+diff --git a/fairy-system/test/accepted-baseline.test.js b/fairy-system/test/accepted-baseline.test.js
+index 47ba1f5..09c3cf9 100644
+--- a/fairy-system/test/accepted-baseline.test.js
++++ b/fairy-system/test/accepted-baseline.test.js
+@@ -3,9 +3,10 @@ import { chmodSync, lstatSync, mkdtempSync, mkdirSync, readFileSync, readdirSync
+ import { tmpdir } from 'node:os';
+ import { join } from 'node:path';
+ import { spawnSync } from 'node:child_process';
++import { fileURLToPath } from 'node:url';
+ import test from 'node:test';
+ 
+-const script = new URL('../accepted-baseline.js', import.meta.url).pathname;
++const script = fileURLToPath(new URL('../accepted-baseline.js', import.meta.url));
+ 
+ function fixture() {
+   const root = mkdtempSync(join(tmpdir(), 'dsh-accepted-baseline-test-'));
+diff --git a/fairy-system/test/upgrade.test.js b/fairy-system/test/upgrade.test.js
+index 2a6dddc..ca3253d 100644
+--- a/fairy-system/test/upgrade.test.js
++++ b/fairy-system/test/upgrade.test.js
+@@ -15,7 +15,7 @@ const expectedHash = '13a5fe0ee8cddda2306d302eb0dbfdd601e96d14baeb512867b4b6d1d7
+ const expectedVersion = '0.1.1-rc.2';
+ 
+ function run(args, env = {}) {
+-  return spawnSync(process.execPath, [script.pathname, ...args], { encoding: 'utf8', env: { ...process.env, ...env } });
++  return spawnSync(process.execPath, [fileURLToPath(script), ...args], { encoding: 'utf8', env: { ...process.env, ...env } });
+ }
+ 
+ function createIsolatedFixture() {

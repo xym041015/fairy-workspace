@@ -1,0 +1,12 @@
+packages:
+  - .
+
+nodeLinker: hoisted
+autoInstallPeers: false
+minimumReleaseAgeExclude:
+  - dsh-whale-widget@0.3.18
+  - billion-context@0.1.180
+allowBuilds:
+  cloudflared: set this to true or false
+  cpu-features: set this to true or false
+  ssh2: set this to true or false

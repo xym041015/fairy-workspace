@@ -1,0 +1,206 @@
+# Your patch layer for this dsh profile, applied after every bundle layer:
+# a top-level YAML array of loader patch entries (id-targeted config
+# overrides, disables, and insert lists; `!!js` expressions allowed).
+
+# >>> fairy-dsh profile template (adopted 2026-09-18, user-approved) >>>
+# Security posture from the upstream Fairy-DSH profiles/web template.
+# Revert: restore cordis.patch.yml from .fairy-install-backup/pre-template-20260918/
+- id: sandbox-policy
+  config:
+    mode: danger-full-access
+    workspaceRoot: !!js process.cwd()
+
+- id: approval
+  config:
+    policy: never
+
+- id: permission
+  config:
+    defaultPreset: danger-full-access
+# <<< fairy-dsh profile template <<<
+
+- id: web-ui-compat
+  disabled: false
+- id: web-ui-settings
+  disabled: false
+- id: web-ui-plugin-manager
+  disabled: false
+- id: web-ui-market
+  disabled: false
+  config:
+    plugin: "@linxin666/dsh-client-ui-market"
+    enabled: false
+- id: web-ui-dsh-aionui-panel
+  disabled: false
+- id: web-ui-task-board
+  disabled: false
+- id: web-ui-git-graph
+  disabled: false
+- id: web-ui-dsh-perf
+  disabled: false
+- id: web-ui-remote-web-ui
+  disabled: false
+- id: web-ui-pet
+  disabled: false
+  config:
+    visible: true
+    size: 160
+    right: 0
+    bottom: 82
+    petId: aemes
+    enabled: false
+- id: web-ui-ssh
+  disabled: false
+- id: web-ui-describe-image
+  disabled: false
+- id: web-ui-liangshen
+  disabled: false
+- id: web-ui-skill-explorer
+  disabled: false
+- id: web-ui-desktop-launcher
+  disabled: false
+- id: web-ui-doctor
+  disabled: false
+- id: web-ui-skin-center
+  disabled: false
+- id: web-ui-better-sidebar
+  disabled: false
+- id: web-ui-archive-manager
+  disabled: false
+- id: web-ui-session-branch
+  disabled: false
+- id: web-ui-session-rdb
+  disabled: false
+- id: web-ui-conversation-message-actions
+  disabled: false
+- id: web-ui-usage
+  disabled: false
+- id: web-ui-session-archive
+  disabled: false
+- id: web-ui-model-capabilities
+  disabled: false
+- id: web-ui-preset-center
+  disabled: false
+- id: web-ui-i18n
+  disabled: false
+
+- id: hindsight
+  disabled: false
+
+# >>> fairy-dsh (install-fairy-to-dsh.sh) >>>
+- insert:
+    - id: balance-meter
+      name: 'dsh-balance-meter'
+      inject: [ clientModules ]
+
+    - id: browser-dock
+      name: 'dsh-browser-dock'
+      inject: [ clientModules ]
+
+    - id: fairy-startup
+      name: 'dsh-fairy-startup'
+      inject: [ clientModules ]
+
+    - id: fairy-voice
+      name: 'dsh-fairy-voice'
+      inject: [ clientModules ]
+
+    - id: fairy-visual
+      name: 'dsh-fairy-visual'
+      inject: [ clientModules ]
+# <<< fairy-dsh (install-fairy-to-dsh.sh) <<<
+# >>> fairy-dsh context7 MCP (adopted from template 2026-09-18) >>>
+- insert:
+    - id: mcp-context7
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: context7
+        transport: stdio
+        command: '/Users/xuzhouping/.dsh/profiles/web/node_modules/.bin/context7-mcp'
+        args: []
+# <<< fairy-dsh context7 MCP <<<
+
+
+
+# >>> fairy-dsh browser MCP (install-fairy-to-dsh.sh) >>>
+- insert:
+    - id: mcp-playwright
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: playwright
+        transport: stdio
+        command: '/Users/xuzhouping/Desktop/开发者/fairy
+          deepseek开发/Fairy-DSH/browser-dock/dsh-browser-dock/proxy.cjs'
+        args:
+          [
+            '--browser',
+            'msedge',
+            '--headless',
+            '--user-data-dir',
+            '/Users/xuzhouping/.dsh/playwright-profile'
+          ]
+- id: dsh-worktable
+  name: dsh-worktable
+  disabled: true
+- id: ui-settings-general
+  name: "@deepseek-ai/dsh-client-ui-settings-general"
+  config:
+    welcomeNoticeVersion: 2026-09-28.1
+- id: agent-default-model
+  name: "@deepseek-ai/dsh-agent-default-model"
+  config:
+    provider: deepseek-official
+    model: deepseek-flash
+    reasoningEffort: low
+- id: remote-web-ui
+  name: "@linxin666/dsh-remote-web-ui"
+  config:
+    requirePairingForLan: false
+- id: llm-pi-ai
+  name: "@deepseek-ai/dsh-llm-pi-ai"
+  config:
+    providers: {}
+- id: dsh-super-injector
+  disabled: true
+- id: remote-web-ui
+  disabled: true
+- id: ui-skill-explorer
+  disabled: true
+- id: web-ui-compat
+  disabled: true
+- id: web-ui-settings
+  disabled: true
+- id: web-ui-plugin-manager
+  disabled: true
+- id: web-ui-market
+  disabled: true
+- id: web-ui-task-board
+  disabled: true
+- id: web-ui-git-graph
+  disabled: true
+- id: web-ui-remote-web-ui
+  disabled: true
+- id: web-ui-update
+  disabled: true
+- id: web-ui-ssh
+  disabled: true
+- id: web-ui-liangshen
+  disabled: true
+- id: web-ui-skill-explorer
+  disabled: true
+- id: web-ui-usage
+  disabled: true
+- id: web-ui-session-archive
+  disabled: true
+- id: web-ui-model-capabilities
+  disabled: true
+- id: web-ui-i18n
+  disabled: true
+- id: web-ui-community-plugins
+  disabled: true
+- id: web-ui-pet
+  disabled: true
+- id: web-ui-preset-center
+  disabled: true
+- id: web-ui-skin-center
+  disabled: true

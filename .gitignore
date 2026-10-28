@@ -1,0 +1,11 @@
+node_modules/
+.pnpm-store/
+.DS_Store
+*.log
+edge-profile2/
+cache/
+crash/
+probe-ws/
+**/mirror/home/.credentials.yaml
+**/mirror/home/.anonymous-user-id
+**/mirror/home/sessions/

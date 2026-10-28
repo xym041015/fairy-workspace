@@ -1,0 +1,1 @@
+(() => { const im = document.querySelector('img.dshwv-img'); if (im) { im.style.display = 'none'; } return JSON.stringify({ hidden: !!im }); })()

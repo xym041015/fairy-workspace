@@ -1,0 +1,13 @@
+set -e
+cd "/Users/xuzhouping/Desktop/开发者/fairy deepseek开发/fairy-dev-tools/tts/GPT-SoVITS" </dev/null
+export UV_CACHE_DIR="/Users/xuzhouping/Desktop/开发者/fairy deepseek开发/fairy-dev-tools/tts/.uv-cache"; export HOME="/Users/xuzhouping/Desktop/开发者/fairy deepseek开发/fairy-dev-tools/tts/home"
+uv pip install --python .venv/bin/python --index-url https://pypi.tuna.tsinghua.edu.cn/simple "torch==2.6.0" "torchaudio==2.6.0" 2>&1 | tail -3
+.venv/bin/python -c "import torch, torchaudio; print('torch', torch.__version__, 'torchaudio', torchaudio.__version__)" 2>&1 | tail -1
+pkill -f "api_v2.py" 2>/dev/null || true; sleep 3
+bash "/Users/xuzhouping/Desktop/开发者/fairy deepseek开发/fairy-dev-tools/start-voice-engine.sh" 2>&1 | tail -2
+echo "=== 合成测试 ==="
+time curl -s -m 300 -X POST -H "Content-Type: application/json" -d '{"text":"分析：链路已经打通，主人。"}' http://127.0.0.1:5599/fairy-voice/tts -o "/Users/xuzhouping/Desktop/开发者/fairy deepseek开发/fairy-dev-tools/clone-out5.pcm" -w "http=%{http_code} bytes=%{size_download}\n"
+node -e "
+const fs=require('fs');const b=fs.readFileSync('/Users/xuzhouping/Desktop/开发者/fairy deepseek开发/fairy-dev-tools/clone-out5.pcm');let peak=0,sum=0,n=0;for(let i=0;i+1<b.length;i+=2){const v=b.readInt16LE(i)/32768;peak=Math.max(peak,Math.abs(v));sum+=v*v;n++;}
+console.log(JSON.stringify({bytes:b.length,seconds:+(n/32000).toFixed(2),peak:+peak.toFixed(3),silent:peak<0.01}));"
+grep -vE "^  File|^    " "/Users/xuzhouping/Desktop/开发者/fairy deepseek开发/fairy-dev-tools/tts/api.log" | tail -3

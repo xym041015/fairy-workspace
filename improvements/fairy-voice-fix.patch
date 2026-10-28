@@ -1,0 +1,745 @@
+diff --git a/fairy-voice/dsh-fairy-voice/lib/client.js b/fairy-voice/dsh-fairy-voice/lib/client.js
+index 3c545fc..b3445b0 100644
+--- a/fairy-voice/dsh-fairy-voice/lib/client.js
++++ b/fairy-voice/dsh-fairy-voice/lib/client.js
+@@ -413,6 +413,7 @@ module.exports = { FAIRY_LOG_PREFIX, createFairyDiagnostics };
+ .dsh-fairy-voice-auto{width:22px;height:22px;display:grid;place-items:center;flex:none;padding:0;border:0;border-radius:6px;background:transparent;color:var(--dsw-alias-label-tertiary);cursor:pointer;transition:background .15s,color .15s}
+ .dsh-fairy-voice-auto:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary)}
+ .dsh-fairy-voice-auto[data-on="true"]{background:color-mix(in srgb,var(--dsw-alias-label-secondary) 12%,transparent);color:var(--dsw-alias-label-secondary)}
++.dsh-fairy-voice-auto svg{display:block;width:16px;height:16px}
+ .dsh-fairy-voice-auto:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px}
+ .dsh-fairy-voice-auto:disabled,.dsh-fairy-voice-volume:disabled{cursor:not-allowed;opacity:.42}
+ .dsh-fairy-voice-volume{--dsh-fairy-volume:100%;appearance:none;-webkit-appearance:none;width:66px;height:22px;margin:0;background:transparent;cursor:pointer}
+@@ -1005,8 +1006,13 @@ module.exports = { FAIRY_LOG_PREFIX, createFairyDiagnostics };
+       return { state, play, playSystem, stop, primeAudio, setOutputVolume };
+     }
+ 
+-    function VoiceController({ useSession, sessionId }) {
+-      const snapshot = useSession(readVoiceTimeline);
++    function VoiceController({ useSession, sessionId, useChat }) {
++      // The session snapshot no longer carries the chat projection in this DSH
++      // layout; the composer slot injects useChat for it. Merge both so the
++      // timeline selector keeps one contract across DSH generations.
++      const sessionSnapshot = useSession((state) => state);
++      const chatSnapshot = typeof useChat === 'function' ? useChat((state) => state) : null;
++      const snapshot = readVoiceTimeline({ ...sessionSnapshot, chat: chatSnapshot || undefined });
+       const sessionKey = String(sessionId ?? snapshot.sessionKey ?? 'empty-chat');
+       const activeSessions = activeSessionStore || emptyActiveSessionStore;
+       const activeSelection = React.useSyncExternalStore(activeSessions.subscribe, activeSessions.getSnapshot, activeSessions.getSnapshot);
+@@ -1420,6 +1426,21 @@ module.exports = { FAIRY_LOG_PREFIX, createFairyDiagnostics };
+       });
+       const autoLabel = autoRead ? '关闭自动朗读' : '开启自动朗读';
+       const engineAvailable = engine === 'system' || availability.available;
++      // Manual read-now: one click unlocks the audio device inside the user
++      // gesture, guarantees an audible volume, and replays the newest settled
++      // answer instead of only arming automatic playback for later turns.
++      const readLatest = React.useCallback(() => {
++        if (!engineAvailable) return;
++        if (state.status === 'playing') { stop(); return; }
++        if (!autoRead) setAutoRead(true);
++        const audibleVolume = volume > 0.05 ? volume : 1;
++        if (audibleVolume !== volume) { setVolume(audibleVolume); setOutputVolume(audibleVolume); }
++        primeAudio(audibleVolume).catch((error) => reportAudioLifecycleFailure('prime', error));
++        const settled = snapshot.messagesById ? [...snapshot.messagesById.values()] : [];
++        const latest = settled.length ? settled[settled.length - 1] : null;
++        if (!latest || !latest.markdown) return;
++        window.dispatchEvent(new CustomEvent(EVENT_PLAY, { detail: { messageId: latest.id, markdown: latest.markdown, sessionKey } }));
++      }, [autoRead, engineAvailable, primeAudio, sessionKey, setOutputVolume, snapshot, state.status, stop, volume]);
+       // Fixed irregular heights avoid a visible repeating cadence while keeping
+       // React renders deterministic and free from animation jitter.
+       const waveHeights = [6, 11, 8, 14, 10, 5, 13, 9, 14, 7, 12, 13, 6, 10, 14, 8, 13, 5, 11, 9, 13, 7, 10, 14, 6, 12, 8, 11, 5, 13];
+@@ -1428,7 +1449,8 @@ module.exports = { FAIRY_LOG_PREFIX, createFairyDiagnostics };
+         return jsx.jsx('span', { className: 'dsh-fairy-voice-wave-bar', 'data-dsh-fairy-wave-bar': 'true', 'data-active': active ? 'true' : 'false', style: { '--dsh-fairy-wave-height': `${height}px`, '--dsh-fairy-wave-opacity': active ? '.86' : '.22' }, 'aria-hidden': 'true', key: index });
+       });
+       return jsx.jsxs('span', { className: 'dsh-fairy-voice-controls', role: 'group', 'aria-label': 'Fairy 朗读控制', [FAIRY_VOICE_CONTROL_ATTRIBUTE]: 'true', children: [
+-        jsx.jsx(Tooltip, { label: engineAvailable ? autoLabel : availability.reason, children: jsx.jsx('button', { type: 'button', className: 'dsh-fairy-voice-auto', 'data-dsh-fairy-auto-control': 'true', 'data-on': autoRead ? 'true' : 'false', disabled: !engineAvailable, onClick: () => setAutoRead((value) => !value), 'aria-label': autoLabel, 'aria-pressed': autoRead, children: jsx.jsx('span', { className: 'dsh-fairy-voice-auto-dot', 'data-dsh-fairy-auto-dot': 'true', 'aria-hidden': 'true' }) }) }),
++        jsx.jsx(Tooltip, { label: state.status === 'playing' ? '停止朗读' : '朗读当前回答', children: jsx.jsx('button', { type: 'button', className: 'dsh-fairy-voice-auto', 'data-dsh-fairy-play-control': 'true', 'data-on': state.status === 'playing' ? 'true' : 'false', disabled: !engineAvailable, onClick: readLatest, 'aria-label': state.status === 'playing' ? '停止朗读' : '朗读当前回答', children: state.status === 'playing' ? jsx.jsx(IconStopFill16, {}) : jsx.jsx(IconPlayOutline16, {}) }) }),
++        jsx.jsx(Tooltip, { label: engineAvailable ? autoLabel : availability.reason, children: jsx.jsx('button', { type: 'button', className: 'dsh-fairy-voice-auto', 'data-dsh-fairy-auto-control': 'true', 'data-on': autoRead ? 'true' : 'false', disabled: !engineAvailable, onClick: () => setAutoRead((value) => !value), 'aria-label': autoLabel, 'aria-pressed': autoRead, children: jsx.jsx('svg', { viewBox: '0 0 16 16', width: '16', height: '16', 'aria-hidden': 'true', children: jsx.jsx('path', { d: 'M13.3 6.4A5.5 5.5 0 0 0 3.4 5.1M2.7 9.6a5.5 5.5 0 0 0 9.9 1.3M3.6 2.2v3h3M12.4 13.8v-3h-3', fill: 'none', stroke: 'currentColor', strokeWidth: '1.5', strokeLinecap: 'round', strokeLinejoin: 'round' }) }) }) }),
+         jsx.jsx('span', { className: 'dsh-fairy-voice-waveform', 'data-dsh-fairy-waveform': 'true', 'aria-hidden': 'true', children: waveform }),
+         jsx.jsx(Tooltip, { label: `语音音量 ${Math.round(volume * 100)}%`, children: jsx.jsx('input', { className: 'dsh-fairy-voice-volume', 'data-dsh-fairy-volume-input': 'true', disabled: !engineAvailable, min: '0', max: '1', step: '0.05', type: 'range', value: volume, onChange: (event) => setVolume(Number(event.target.value)), 'aria-label': '语音音量', style: { '--dsh-fairy-volume': `${Math.round(volume * 100)}%` } }) }),
+         engine === 'fairy' && state.status === 'error' ? jsx.jsx('span', { title: state.error, style: { color: 'var(--dsw-alias-state-error-primary)', fontSize: '12px', maxWidth: '96px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }, children: '朗读失败' }) : null
+diff --git a/fairy-voice/dsh-fairy-voice/lib/index.js b/fairy-voice/dsh-fairy-voice/lib/index.js
+index 26e7c44..43f1e57 100644
+--- a/fairy-voice/dsh-fairy-voice/lib/index.js
++++ b/fairy-voice/dsh-fairy-voice/lib/index.js
+@@ -3,25 +3,34 @@ import { gfmFromMarkdown } from 'mdast-util-gfm';
+ import { gfm } from 'micromark-extension-gfm';
+ import { homedir } from 'node:os';
+ import { dirname, join } from 'node:path';
++import { stat as statFile } from 'node:fs/promises';
+ import { readFileSync } from 'node:fs';
+ import { chmod, mkdir, open, readFile, rename, unlink, writeFile } from 'node:fs/promises';
+ import { randomUUID } from 'node:crypto';
+ import { createLocalTtsTransport, createPcmStreamHandler } from './server/local-tts-proxy.js';
+ import { createVoiceBriefFallback, createVoiceBrainServerBoundary } from './server/voice-brief-fallback.js';
++import { createSystemTtsTransport } from './server/system-tts.js';
+ import { createFairyDiagnostics } from 'dsh-fairy-contracts/diagnostics';
+ 
+ const LOCAL_TTS_URL = 'http://127.0.0.1:9880/tts';
+ const LOCAL_DOCS_URL = 'http://127.0.0.1:9880/docs';
+-const REFERENCE_AUDIO_PATH = join(homedir(), '.dsh', 'fairy-voice', 'runtime', 'reference', 'fairy_ref.wav');
+-const REFERENCE_PROMPT_PATH = join(homedir(), '.dsh', 'fairy-voice', 'runtime', 'reference', 'fairy_ref.txt');
++const FAIRY_HOME = process.env.DSH_HOME || join(homedir(), '.dsh');
++const REFERENCE_DIR = process.env.DSH_FAIRY_REFERENCE_DIR || join(FAIRY_HOME, 'fairy-voice', 'runtime', 'reference');
++const REFERENCE_AUDIO_PATH = join(REFERENCE_DIR, 'fairy_ref.wav');
++const REFERENCE_PROMPT_PATH = join(REFERENCE_DIR, 'fairy_ref.txt');
+ const REFERENCE_PROMPT_FALLBACK = '根据用户协议，我无权回复该问题。主人将在合适的时间与合适的场合获知答案。';
+ const diagnostics = createFairyDiagnostics('dsh-fairy-voice');
+ 
++/* Read lazily: the reference pair can be installed while the host is running.
++ * The first miss is reported once; later misses stay silent. */
+ function readReferencePrompt() {
+   try {
+-    return readFileSync(REFERENCE_PROMPT_PATH, 'utf8').trim();
++    return readFileSync(REFERENCE_PROMPT_PATH, 'utf8').trim() || REFERENCE_PROMPT_FALLBACK;
+   } catch (error) {
+-    diagnostics.warn('reference.prompt.load', { file: 'fairy_ref.txt', fallback: true }, error);
++    if (!readReferencePrompt.warned) {
++      readReferencePrompt.warned = true;
++      diagnostics.warn('reference.prompt.load', { file: 'fairy_ref.txt', fallback: true }, error);
++    }
+     return REFERENCE_PROMPT_FALLBACK;
+   }
+ }
+@@ -36,7 +45,8 @@ const MAX_VOICE_BRIEF_INPUT_LENGTH = 32_000;
+ const MAX_VOICE_BRIEF_OUTPUT_LENGTH = 260;
+ const DEEPSEEK_V4_FLASH_MODEL = 'deepseek-v4-flash';
+ const DEEPSEEK_CHAT_COMPLETIONS_URL = 'https://api.deepseek.com/chat/completions';
+-const VOICE_BRAIN_CONFIG_PATH = join(homedir(), '.dsh', 'fairy-voice', 'voice-brain.json');
++const VOICE_BRAIN_CONFIG_PATH = join(FAIRY_HOME, 'fairy-voice', 'voice-brain.json');
++const SYSTEM_TTS_FALLBACK_CODES = new Set(['local-service-unavailable', 'local-service-failed', 'timeout']);
+ function safeText(value) {
+   return typeof value === 'string' ? value.replace(/\s+/g, ' ').trim() : '';
+ }
+@@ -457,6 +467,27 @@ const createVoiceBrief = createVoiceBriefFallback({
+   endpoint: DEEPSEEK_CHAT_COMPLETIONS_URL,
+ });
+ 
++/* Preserve a probed first chunk: the failure mode we guard against (a 200 with an
++ * empty body) must be distinguishable without losing the buffered audio. */
++async function readFirstChunk(response) {
++  const body = response?.body;
++  if (!body) return { ok: false, upstream: { response, release: null } };
++  const iterator = body[Symbol.asyncIterator]();
++  const first = await iterator.next();
++  if (first.done || !first.value || !first.value.length) {
++    return { ok: false, upstream: { response, release: null } };
++  }
++  const replay = (async function* replayBody() {
++    yield first.value;
++    for (;;) {
++      const next = await iterator.next();
++      if (next.done) return;
++      yield next.value;
++    }
++  })();
++  return { ok: true, upstream: { response: { ok: response.ok, status: response.status, headers: response.headers, body: replay }, release: response.release ?? null } };
++}
++
+ export function createFairyVoiceHandlers({ fetchImpl = fetch, readConfig = readVoiceBrainConfig, writeConfig = writeVoiceBrainConfig, clearConfig = clearVoiceBrainConfig } = {}) {
+   const sentencePreparation = createSentencePreparation();
+   const pcmStreamHandler = createPcmStreamHandler();
+@@ -465,10 +496,11 @@ export function createFairyVoiceHandlers({ fetchImpl = fetch, readConfig = readV
+     ttsUrl: LOCAL_TTS_URL,
+     docsUrl: LOCAL_DOCS_URL,
+     referenceAudioPath: REFERENCE_AUDIO_PATH,
+-    referencePrompt: REFERENCE_PROMPT,
++    referencePrompt: () => readReferencePrompt(),
+     ttsTimeoutMs: TTS_TIMEOUT_MS,
+     statusTimeoutMs: STATUS_TIMEOUT_MS,
+   });
++  const systemTtsTransport = createSystemTtsTransport();
+   const voiceBrainBoundary = createVoiceBrainServerBoundary({
+     createBrief: createVoiceBrief,
+     fetchImpl,
+@@ -492,7 +524,21 @@ export function createFairyVoiceHandlers({ fetchImpl = fetch, readConfig = readV
+     status: async (_req, res) => {
+       const startedAt = diagnostics.start();
+       try {
+-        sendJson(res, 200, await localTtsTransport.status());
++        try {
++          const voiceStatus = await localTtsTransport.status();
++          const reference = await statFile(REFERENCE_AUDIO_PATH).catch(() => null);
++          sendJson(res, 200, {
++            ...voiceStatus,
++            backend: 'gpt-sovits',
++            voice: 'Fairy',
++            referenceInstalled: Boolean(reference),
++            reason: reference ? null : '需要 3-10 秒的 Fairy 参考音频（见 /fairy-voice/reference）。',
++          });
++        } catch (localError) {
++          // Without the local GPT-SoVITS service the host system voice keeps
++          // the voice surface usable instead of reporting a dead service.
++          sendJson(res, 200, await systemTtsTransport.status());
++        }
+       } catch (error) {
+         diagnostics.warn('status.request', {}, error);
+         sendJson(res, 200, { available: false, reason: '本地 Fairy 服务未启动。' });
+@@ -529,6 +575,34 @@ export function createFairyVoiceHandlers({ fetchImpl = fetch, readConfig = readV
+         sendJson(res, statusFor(code), { error: publicError(code) });
+       }
+     },
++    reference: async (req, res) => {
++      try {
++        if (req.method === 'GET') {
++          const stat = await statFile(REFERENCE_AUDIO_PATH);
++          const text = readReferencePrompt();
++          sendJson(res, 200, {
++            installed: Boolean(stat),
++            audioBytes: stat ? stat.size : 0,
++            text: text === REFERENCE_PROMPT_FALLBACK ? '' : text,
++            directory: REFERENCE_DIR,
++          });
++          return;
++        }
++        const body = await readJson(req, 40_000_000);
++        const audio = typeof body?.audioBase64 === 'string' ? Buffer.from(body.audioBase64, 'base64') : null;
++        if (!audio || !audio.length) throw Object.assign(new Error('missing audio'), { code: 'invalid-json' });
++        await mkdir(dirname(REFERENCE_AUDIO_PATH), { recursive: true });
++        await writeFile(REFERENCE_AUDIO_PATH, audio, { mode: 0o600 });
++        const text = typeof body?.text === 'string' ? body.text.trim() : '';
++        await writeFile(REFERENCE_PROMPT_PATH, text || REFERENCE_PROMPT_FALLBACK, { mode: 0o600 });
++        diagnostics.metric('reference.install', Date.now(), { audio_bytes: audio.length, text_chars: text.length });
++        sendJson(res, 200, { installed: true, audioBytes: audio.length, text });
++      } catch (error) {
++        const code = error?.code === 'invalid-json' ? 'invalid-json' : 'reference-install-failed';
++        diagnostics.warn('reference.install', { code }, error);
++        sendJson(res, statusFor(code), { error: publicError(code) });
++      }
++    },
+     voiceBrief: async (req, res) => {
+       const startedAt = diagnostics.start();
+       const scope = createVoiceRequestScope();
+@@ -573,12 +647,28 @@ export function createFairyVoiceHandlers({ fetchImpl = fetch, readConfig = readV
+         if (Array.from(text).length > MAX_TTS_TEXT_LENGTH) throw Object.assign(new Error('large'), { code: 'text-too-large' });
+         activeTtsController?.abort('superseded');
+         activeTtsController = controller;
+-        const upstream = await localTtsTransport.stream(text, controller.signal);
++        let upstream = null;
++        let usedSystemVoice = false;
++        try {
++          upstream = await localTtsTransport.stream(text, controller.signal);
++          // A 200 response can still yield no audio (device/library failures far
++          // inside the local engine). Probe the first chunk so the request can
++          // still be served audibly by the host system voice instead of silence.
++          const probe = await readFirstChunk(upstream.response || upstream);
++          if (!probe.ok) throw Object.assign(new Error('local synthesis produced no audio'), { code: 'local-service-failed' });
++          upstream = probe.upstream;
++        } catch (localError) {
++          if (!SYSTEM_TTS_FALLBACK_CODES.has(localError?.code)) throw localError;
++          diagnostics.metric('tts.stream.fallback', startedAt, { code: localError.code });
++          upstream = await systemTtsTransport.stream(text, controller.signal);
++          usedSystemVoice = true;
++        }
+         const response = upstream.response || upstream;
+         releaseUpstream = upstream.release || null;
+         if (!response.ok) throw Object.assign(new Error('local synthesis failed'), { code: 'local-service-failed' });
+         res.statusCode = 200;
+         res.setHeader('Content-Type', response.headers.get('content-type') || 'audio/raw');
++        res.setHeader('X-Fairy-Voice', usedSystemVoice ? 'system' : 'fairy');
+         res.setHeader('Cache-Control', 'no-store');
+         await pcmStreamHandler.pipe(response, res, controller.signal);
+         if (!res.destroyed && !res.writableEnded) res.end();
+@@ -616,6 +706,7 @@ export function apply(ctx) {
+     const unregisterBrainStatus = ws.webServer.register({ kind: 'exact', path: '/fairy-voice/brain/status', handler: handlers.voiceBrainStatus });
+     const unregisterBrainConfig = ws.webServer.register({ kind: 'exact', path: '/fairy-voice/brain/config', handler: handlers.voiceBrainConfig });
+     const unregisterBrainBrief = ws.webServer.register({ kind: 'exact', path: '/fairy-voice/brain/brief', handler: handlers.voiceBrief });
++    const unregisterReference = ws.webServer.register({ kind: 'exact', path: '/fairy-voice/reference', handler: handlers.reference });
+     return () => {
+       handlers.dispose();
+       unregisterStatus?.();
+@@ -624,6 +715,7 @@ export function apply(ctx) {
+       unregisterBrainStatus?.();
+       unregisterBrainConfig?.();
+       unregisterBrainBrief?.();
++      unregisterReference?.();
+     };
+   }));
+   }, { surface: 'host' });
+diff --git a/fairy-voice/dsh-fairy-voice/lib/server/local-tts-proxy.js b/fairy-voice/dsh-fairy-voice/lib/server/local-tts-proxy.js
+index ff4f2ef..cbe567e 100644
+--- a/fairy-voice/dsh-fairy-voice/lib/server/local-tts-proxy.js
++++ b/fairy-voice/dsh-fairy-voice/lib/server/local-tts-proxy.js
+@@ -88,10 +88,11 @@ export function createLocalTtsTransport({
+   const stream = (url, options, timeoutMs, signal) => fetchImpl === fetch
+     ? openLocalStream(url, options, timeoutMs, signal)
+     : fetchImpl(url, { ...options, signal }).then((response) => ({ response, release: null }));
++  const resolvePrompt = () => (typeof referencePrompt === 'function' ? referencePrompt() : referencePrompt);
+   const localTtsRequest = (text) => ({
+     method: 'POST',
+     headers: { 'Content-Type': 'application/json' },
+-    body: JSON.stringify({ text, text_lang: 'zh', ref_audio_path: referenceAudioPath, prompt_text: referencePrompt, prompt_lang: 'zh', text_split_method: 'cut5', batch_size: 1, media_type: 'raw', streaming_mode: 1, fragment_interval: 0.14, parallel_infer: false }),
++    body: JSON.stringify({ text, text_lang: 'zh', ref_audio_path: referenceAudioPath, prompt_text: resolvePrompt(), prompt_lang: 'zh', text_split_method: 'cut5', batch_size: 1, media_type: 'raw', streaming_mode: 1, fragment_interval: 0.14, parallel_infer: false }),
+   });
+   return {
+     status(signal) {
+diff --git a/fairy-voice/dsh-fairy-voice/lib/server/system-tts.js b/fairy-voice/dsh-fairy-voice/lib/server/system-tts.js
+new file mode 100644
+index 0000000..c3f4c9a
+--- /dev/null
++++ b/fairy-voice/dsh-fairy-voice/lib/server/system-tts.js
+@@ -0,0 +1,151 @@
++/* macOS system-voice fallback: renders the same raw PCM contract as the local
++ * GPT-SoVITS service (32 kHz, 16-bit, mono) so the web client streams it
++ * unchanged when no local synthesis service is running. No route, settings, or
++ * sentence ownership lives here. */
++import { spawn } from 'node:child_process';
++import { mkdtemp, readFile, rm } from 'node:fs/promises';
++import { tmpdir } from 'node:os';
++import { join } from 'node:path';
++import { Readable } from 'node:stream';
++
++const SAY_BIN = '/usr/bin/say';
++const AFCONVERT_BIN = '/usr/bin/afconvert';
++const SAMPLE_RATE = 32_000;
++const CHUNK_BYTES = 64 * 1024;
++const PREFERRED_VOICES = ['Tingting', 'Meijia', 'Sinji', 'Flo', 'Grandma', 'Eddy', 'Reed'];
++
++function run(command, args, { signal, timeoutMs = 180_000 } = {}) {
++  return new Promise((resolve, reject) => {
++    const child = spawn(command, args, { signal, stdio: ['ignore', 'pipe', 'pipe'] });
++    const stdout = [];
++    child.stdout?.on('data', (chunk) => stdout.push(chunk));
++    child.stderr?.on('data', () => {});
++    const timer = setTimeout(() => child.kill('SIGKILL'), timeoutMs);
++    child.once('error', (error) => {
++      clearTimeout(timer);
++      reject(Object.assign(new Error('system voice unavailable'), { code: 'local-service-unavailable', cause: error }));
++    });
++    child.once('close', (code) => {
++      clearTimeout(timer);
++      if (code === 0) resolve(Buffer.concat(stdout).toString('utf8'));
++      else reject(Object.assign(new Error('system synthesis failed'), { code: 'local-service-failed' }));
++    });
++  });
++}
++
++export function parseVoiceList(output) {
++  const voices = [];
++  for (const line of String(output || '').split('\n')) {
++    const match = /^(.*?)\s+([a-z]{2}_[A-Z]{2})\s+#/.exec(line.trim());
++    if (match) voices.push({ name: match[1].trim(), locale: match[2] });
++  }
++  return voices;
++}
++
++export function selectVoice(voices, override = '') {
++  const preferred = String(override || '').trim();
++  if (preferred) return preferred;
++  for (const candidate of PREFERRED_VOICES) {
++    const hit = voices.find((voice) => voice.locale === 'zh_CN' && voice.name.toLowerCase().startsWith(candidate.toLowerCase()));
++    if (hit) return hit.name;
++  }
++  for (const locale of ['zh_CN', 'zh_TW', 'zh_HK']) {
++    const hit = voices.find((voice) => voice.locale === locale);
++    if (hit) return hit.name;
++  }
++  return voices.find((voice) => voice.locale.startsWith('zh'))?.name || '';
++}
++
++/* Only the exact client contract is accepted: mono, 16-bit, at the sample rate
++ * the browser's AudioContext is constructed with. Anything else is converted. */
++export function wavPcmData(buffer, sampleRate = SAMPLE_RATE) {
++  if (!buffer || buffer.length < 44) return null;
++  if (buffer.toString('ascii', 0, 4) !== 'RIFF' || buffer.toString('ascii', 8, 12) !== 'WAVE') return null;
++  let offset = 12;
++  let format = null;
++  while (offset + 8 <= buffer.length) {
++    const id = buffer.toString('ascii', offset, offset + 4);
++    const size = buffer.readUInt32LE(offset + 4);
++    const body = offset + 8;
++    if (id === 'fmt ' && size >= 16 && body + 16 <= buffer.length) {
++      format = {
++        audioFormat: buffer.readUInt16LE(body),
++        channels: buffer.readUInt16LE(body + 2),
++        sampleRate: buffer.readUInt32LE(body + 4),
++        bitsPerSample: buffer.readUInt16LE(body + 14),
++      };
++    }
++    if (id === 'data') {
++      if (!format) return null;
++      const valid = format.audioFormat === 1
++        && format.channels === 1
++        && format.bitsPerSample === 16
++        && format.sampleRate === sampleRate;
++      return valid ? buffer.subarray(body, Math.min(body + size, buffer.length)) : null;
++    }
++    offset = body + size + (size % 2);
++  }
++  return null;
++}
++
++async function* chunkIterable(pcm) {
++  for (let offset = 0; offset < pcm.length; offset += CHUNK_BYTES) {
++    yield pcm.subarray(offset, Math.min(offset + CHUNK_BYTES, pcm.length));
++  }
++}
++
++export function createSystemTtsTransport({
++  runCommand = run,
++  voiceOverride = process.env.DSH_FAIRY_TTS_VOICE || '',
++  speechRate = process.env.DSH_FAIRY_TTS_RATE || '',
++  sampleRate = SAMPLE_RATE,
++  temporaryRoot = tmpdir(),
++} = {}) {
++  let resolvedVoice = null;
++  const resolveVoice = async (signal) => {
++    if (resolvedVoice !== null) return resolvedVoice;
++    const list = await runCommand(SAY_BIN, ['-v', '?'], { signal });
++    resolvedVoice = selectVoice(parseVoiceList(typeof list === 'string' ? list : ''), voiceOverride);
++    return resolvedVoice;
++  };
++  return {
++    async status(signal) {
++      const voice = await resolveVoice(signal);
++      return { available: true, reason: null, backend: 'system-voice', voice: voice || null };
++    },
++    async stream(text, signal) {
++      const voice = await resolveVoice(signal);
++      const directory = await mkdtemp(join(temporaryRoot, 'dsh-fairy-voice-'));
++      const release = () => { void rm(directory, { recursive: true, force: true }).catch(() => {}); };
++      try {
++        const audioPath = join(directory, 'speech.wav');
++        await runCommand(SAY_BIN, [
++          ...(voice ? ['-v', voice] : []),
++          ...(speechRate ? ['-r', String(speechRate)] : []),
++          '-o', audioPath,
++          `--data-format=LEI16@${sampleRate}`,
++          text,
++        ], { signal });
++        let pcm = wavPcmData(await readFile(audioPath), sampleRate);
++        if (!pcm) {
++          const convertedPath = join(directory, 'speech-converted.wav');
++          await runCommand(AFCONVERT_BIN, ['-f', 'WAVE', '-d', `LEI16@${sampleRate}`, '-c', '1', audioPath, convertedPath], { signal });
++          pcm = wavPcmData(await readFile(convertedPath), sampleRate);
++        }
++        if (!pcm || !pcm.length) throw Object.assign(new Error('system synthesis produced no audio'), { code: 'local-service-failed' });
++        const body = Readable.from(chunkIterable(pcm));
++        if (signal) {
++          if (signal.aborted) body.destroy();
++          else signal.addEventListener('abort', () => body.destroy(), { once: true });
++        }
++        return {
++          response: { ok: true, headers: { get: () => 'audio/raw' }, body },
++          release,
++        };
++      } catch (error) {
++        release();
++        throw error;
++      }
++    },
++  };
++}
+diff --git a/fairy-voice/dsh-fairy-voice/test/system-tts.test.js b/fairy-voice/dsh-fairy-voice/test/system-tts.test.js
+new file mode 100644
+index 0000000..30e6be7
+--- /dev/null
++++ b/fairy-voice/dsh-fairy-voice/test/system-tts.test.js
+@@ -0,0 +1,72 @@
++import assert from 'node:assert/strict';
++import { mkdtemp, rm, writeFile } from 'node:fs/promises';
++import { tmpdir } from 'node:os';
++import { join } from 'node:path';
++import test from 'node:test';
++import { createSystemTtsTransport, parseVoiceList, selectVoice, wavPcmData } from '../lib/server/system-tts.js';
++
++const VOICE_LIST = [
++  'Tingting (中文（中国大陆）) zh_CN    # 你好！我叫婷婷。',
++  'Meijia              zh_TW    # 你好，我叫美佳。',
++  'Daniel              en_GB    # Hello, my name is Daniel.',
++].join('\n');
++
++function wavBuffer({ channels = 1, sampleRate = 32000, bits = 16, samples = 8 } = {}) {
++  const data = Buffer.alloc(samples * channels * (bits / 8), 1);
++  const header = Buffer.alloc(44);
++  header.write('RIFF', 0, 'ascii');
++  header.writeUInt32LE(36 + data.length, 4);
++  header.write('WAVE', 8, 'ascii');
++  header.write('fmt ', 12, 'ascii');
++  header.writeUInt32LE(16, 16);
++  header.writeUInt16LE(1, 20);
++  header.writeUInt16LE(channels, 22);
++  header.writeUInt32LE(sampleRate, 24);
++  header.writeUInt32LE((sampleRate * channels * bits) / 8, 28);
++  header.writeUInt16LE((channels * bits) / 8, 32);
++  header.writeUInt16LE(bits, 34);
++  header.write('data', 36, 'ascii');
++  header.writeUInt32LE(data.length, 40);
++  return Buffer.concat([header, data]);
++}
++
++test('selects a Chinese system voice and honours an explicit override', () => {
++  const voices = parseVoiceList(VOICE_LIST);
++  assert.deepEqual(voices.map((voice) => voice.locale), ['zh_CN', 'zh_TW', 'en_GB']);
++  assert.equal(selectVoice(voices), 'Tingting (中文（中国大陆）)');
++  assert.equal(selectVoice(voices, 'Meijia'), 'Meijia');
++});
++
++test('accepts only the 32 kHz mono 16-bit PCM contract', () => {
++  assert.equal(wavPcmData(wavBuffer()).length, 16);
++  assert.equal(wavPcmData(wavBuffer({ channels: 2 })), null);
++  assert.equal(wavPcmData(wavBuffer({ sampleRate: 44100 })), null);
++  assert.equal(wavPcmData(Buffer.from('not a wav')), null);
++});
++
++test('streams raw PCM and converts an unsupported system render', async () => {
++  const root = await mkdtemp(join(tmpdir(), 'fairy-voice-test-'));
++  const calls = [];
++  const runCommand = async (command, args) => {
++    calls.push([command, args]);
++    if (args[0] === '-v' && args[1] === '?') return VOICE_LIST;
++    const target = args.indexOf('-o') >= 0 ? args[args.indexOf('-o') + 1] : args[args.length - 1];
++    await writeFile(target, command.endsWith('afconvert') ? wavBuffer() : wavBuffer({ channels: 2 }));
++    return '';
++  };
++  try {
++    const transport = createSystemTtsTransport({ runCommand, temporaryRoot: root });
++    const status = await transport.status();
++    assert.equal(status.available, true);
++    assert.equal(status.backend, 'system-voice');
++    assert.equal(status.voice, 'Tingting (中文（中国大陆）)');
++    const upstream = await transport.stream('测试', undefined);
++    const chunks = [];
++    for await (const chunk of upstream.response.body) chunks.push(chunk);
++    assert.equal(Buffer.concat(chunks).length, 16);
++    assert.ok(calls.some(([command]) => command.endsWith('afconvert')));
++    upstream.release();
++  } finally {
++    await rm(root, { recursive: true, force: true });
++  }
++});
+diff --git a/a/fairy-voice/dsh-fairy-voice/lib/server/system-tts.js b/fairy-voice/dsh-fairy-voice/lib/server/system-tts.js
+new file mode 100644
+index 0000000..c3f4c9a
+--- b/fairy-voice/dsh-fairy-voice/lib/server/system-tts.js
++++ b/a/fairy-voice/dsh-fairy-voice/lib/server/system-tts.js
+@@ -0,0 +1,151 @@
++/* macOS system-voice fallback: renders the same raw PCM contract as the local
++ * GPT-SoVITS service (32 kHz, 16-bit, mono) so the web client streams it
++ * unchanged when no local synthesis service is running. No route, settings, or
++ * sentence ownership lives here. */
++import { spawn } from 'node:child_process';
++import { mkdtemp, readFile, rm } from 'node:fs/promises';
++import { tmpdir } from 'node:os';
++import { join } from 'node:path';
++import { Readable } from 'node:stream';
++
++const SAY_BIN = '/usr/bin/say';
++const AFCONVERT_BIN = '/usr/bin/afconvert';
++const SAMPLE_RATE = 32_000;
++const CHUNK_BYTES = 64 * 1024;
++const PREFERRED_VOICES = ['Tingting', 'Meijia', 'Sinji', 'Flo', 'Grandma', 'Eddy', 'Reed'];
++
++function run(command, args, { signal, timeoutMs = 180_000 } = {}) {
++  return new Promise((resolve, reject) => {
++    const child = spawn(command, args, { signal, stdio: ['ignore', 'pipe', 'pipe'] });
++    const stdout = [];
++    child.stdout?.on('data', (chunk) => stdout.push(chunk));
++    child.stderr?.on('data', () => {});
++    const timer = setTimeout(() => child.kill('SIGKILL'), timeoutMs);
++    child.once('error', (error) => {
++      clearTimeout(timer);
++      reject(Object.assign(new Error('system voice unavailable'), { code: 'local-service-unavailable', cause: error }));
++    });
++    child.once('close', (code) => {
++      clearTimeout(timer);
++      if (code === 0) resolve(Buffer.concat(stdout).toString('utf8'));
++      else reject(Object.assign(new Error('system synthesis failed'), { code: 'local-service-failed' }));
++    });
++  });
++}
++
++export function parseVoiceList(output) {
++  const voices = [];
++  for (const line of String(output || '').split('\n')) {
++    const match = /^(.*?)\s+([a-z]{2}_[A-Z]{2})\s+#/.exec(line.trim());
++    if (match) voices.push({ name: match[1].trim(), locale: match[2] });
++  }
++  return voices;
++}
++
++export function selectVoice(voices, override = '') {
++  const preferred = String(override || '').trim();
++  if (preferred) return preferred;
++  for (const candidate of PREFERRED_VOICES) {
++    const hit = voices.find((voice) => voice.locale === 'zh_CN' && voice.name.toLowerCase().startsWith(candidate.toLowerCase()));
++    if (hit) return hit.name;
++  }
++  for (const locale of ['zh_CN', 'zh_TW', 'zh_HK']) {
++    const hit = voices.find((voice) => voice.locale === locale);
++    if (hit) return hit.name;
++  }
++  return voices.find((voice) => voice.locale.startsWith('zh'))?.name || '';
++}
++
++/* Only the exact client contract is accepted: mono, 16-bit, at the sample rate
++ * the browser's AudioContext is constructed with. Anything else is converted. */
++export function wavPcmData(buffer, sampleRate = SAMPLE_RATE) {
++  if (!buffer || buffer.length < 44) return null;
++  if (buffer.toString('ascii', 0, 4) !== 'RIFF' || buffer.toString('ascii', 8, 12) !== 'WAVE') return null;
++  let offset = 12;
++  let format = null;
++  while (offset + 8 <= buffer.length) {
++    const id = buffer.toString('ascii', offset, offset + 4);
++    const size = buffer.readUInt32LE(offset + 4);
++    const body = offset + 8;
++    if (id === 'fmt ' && size >= 16 && body + 16 <= buffer.length) {
++      format = {
++        audioFormat: buffer.readUInt16LE(body),
++        channels: buffer.readUInt16LE(body + 2),
++        sampleRate: buffer.readUInt32LE(body + 4),
++        bitsPerSample: buffer.readUInt16LE(body + 14),
++      };
++    }
++    if (id === 'data') {
++      if (!format) return null;
++      const valid = format.audioFormat === 1
++        && format.channels === 1
++        && format.bitsPerSample === 16
++        && format.sampleRate === sampleRate;
++      return valid ? buffer.subarray(body, Math.min(body + size, buffer.length)) : null;
++    }
++    offset = body + size + (size % 2);
++  }
++  return null;
++}
++
++async function* chunkIterable(pcm) {
++  for (let offset = 0; offset < pcm.length; offset += CHUNK_BYTES) {
++    yield pcm.subarray(offset, Math.min(offset + CHUNK_BYTES, pcm.length));
++  }
++}
++
++export function createSystemTtsTransport({
++  runCommand = run,
++  voiceOverride = process.env.DSH_FAIRY_TTS_VOICE || '',
++  speechRate = process.env.DSH_FAIRY_TTS_RATE || '',
++  sampleRate = SAMPLE_RATE,
++  temporaryRoot = tmpdir(),
++} = {}) {
++  let resolvedVoice = null;
++  const resolveVoice = async (signal) => {
++    if (resolvedVoice !== null) return resolvedVoice;
++    const list = await runCommand(SAY_BIN, ['-v', '?'], { signal });
++    resolvedVoice = selectVoice(parseVoiceList(typeof list === 'string' ? list : ''), voiceOverride);
++    return resolvedVoice;
++  };
++  return {
++    async status(signal) {
++      const voice = await resolveVoice(signal);
++      return { available: true, reason: null, backend: 'system-voice', voice: voice || null };
++    },
++    async stream(text, signal) {
++      const voice = await resolveVoice(signal);
++      const directory = await mkdtemp(join(temporaryRoot, 'dsh-fairy-voice-'));
++      const release = () => { void rm(directory, { recursive: true, force: true }).catch(() => {}); };
++      try {
++        const audioPath = join(directory, 'speech.wav');
++        await runCommand(SAY_BIN, [
++          ...(voice ? ['-v', voice] : []),
++          ...(speechRate ? ['-r', String(speechRate)] : []),
++          '-o', audioPath,
++          `--data-format=LEI16@${sampleRate}`,
++          text,
++        ], { signal });
++        let pcm = wavPcmData(await readFile(audioPath), sampleRate);
++        if (!pcm) {
++          const convertedPath = join(directory, 'speech-converted.wav');
++          await runCommand(AFCONVERT_BIN, ['-f', 'WAVE', '-d', `LEI16@${sampleRate}`, '-c', '1', audioPath, convertedPath], { signal });
++          pcm = wavPcmData(await readFile(convertedPath), sampleRate);
++        }
++        if (!pcm || !pcm.length) throw Object.assign(new Error('system synthesis produced no audio'), { code: 'local-service-failed' });
++        const body = Readable.from(chunkIterable(pcm));
++        if (signal) {
++          if (signal.aborted) body.destroy();
++          else signal.addEventListener('abort', () => body.destroy(), { once: true });
++        }
++        return {
++          response: { ok: true, headers: { get: () => 'audio/raw' }, body },
++          release,
++        };
++      } catch (error) {
++        release();
++        throw error;
++      }
++    },
++  };
++}
+diff --git a/a/fairy-voice/dsh-fairy-voice/test/system-tts.test.js b/fairy-voice/dsh-fairy-voice/test/system-tts.test.js
+new file mode 100644
+index 0000000..30e6be7
+--- b/fairy-voice/dsh-fairy-voice/test/system-tts.test.js
++++ b/a/fairy-voice/dsh-fairy-voice/test/system-tts.test.js
+@@ -0,0 +1,72 @@
++import assert from 'node:assert/strict';
++import { mkdtemp, rm, writeFile } from 'node:fs/promises';
++import { tmpdir } from 'node:os';
++import { join } from 'node:path';
++import test from 'node:test';
++import { createSystemTtsTransport, parseVoiceList, selectVoice, wavPcmData } from '../lib/server/system-tts.js';
++
++const VOICE_LIST = [
++  'Tingting (中文（中国大陆）) zh_CN    # 你好！我叫婷婷。',
++  'Meijia              zh_TW    # 你好，我叫美佳。',
++  'Daniel              en_GB    # Hello, my name is Daniel.',
++].join('\n');
++
++function wavBuffer({ channels = 1, sampleRate = 32000, bits = 16, samples = 8 } = {}) {
++  const data = Buffer.alloc(samples * channels * (bits / 8), 1);
++  const header = Buffer.alloc(44);
++  header.write('RIFF', 0, 'ascii');
++  header.writeUInt32LE(36 + data.length, 4);
++  header.write('WAVE', 8, 'ascii');
++  header.write('fmt ', 12, 'ascii');
++  header.writeUInt32LE(16, 16);
++  header.writeUInt16LE(1, 20);
++  header.writeUInt16LE(channels, 22);
++  header.writeUInt32LE(sampleRate, 24);
++  header.writeUInt32LE((sampleRate * channels * bits) / 8, 28);
++  header.writeUInt16LE((channels * bits) / 8, 32);
++  header.writeUInt16LE(bits, 34);
++  header.write('data', 36, 'ascii');
++  header.writeUInt32LE(data.length, 40);
++  return Buffer.concat([header, data]);
++}
++
++test('selects a Chinese system voice and honours an explicit override', () => {
++  const voices = parseVoiceList(VOICE_LIST);
++  assert.deepEqual(voices.map((voice) => voice.locale), ['zh_CN', 'zh_TW', 'en_GB']);
++  assert.equal(selectVoice(voices), 'Tingting (中文（中国大陆）)');
++  assert.equal(selectVoice(voices, 'Meijia'), 'Meijia');
++});
++
++test('accepts only the 32 kHz mono 16-bit PCM contract', () => {
++  assert.equal(wavPcmData(wavBuffer()).length, 16);
++  assert.equal(wavPcmData(wavBuffer({ channels: 2 })), null);
++  assert.equal(wavPcmData(wavBuffer({ sampleRate: 44100 })), null);
++  assert.equal(wavPcmData(Buffer.from('not a wav')), null);
++});
++
++test('streams raw PCM and converts an unsupported system render', async () => {
++  const root = await mkdtemp(join(tmpdir(), 'fairy-voice-test-'));
++  const calls = [];
++  const runCommand = async (command, args) => {
++    calls.push([command, args]);
++    if (args[0] === '-v' && args[1] === '?') return VOICE_LIST;
++    const target = args.indexOf('-o') >= 0 ? args[args.indexOf('-o') + 1] : args[args.length - 1];
++    await writeFile(target, command.endsWith('afconvert') ? wavBuffer() : wavBuffer({ channels: 2 }));
++    return '';
++  };
++  try {
++    const transport = createSystemTtsTransport({ runCommand, temporaryRoot: root });
++    const status = await transport.status();
++    assert.equal(status.available, true);
++    assert.equal(status.backend, 'system-voice');
++    assert.equal(status.voice, 'Tingting (中文（中国大陆）)');
++    const upstream = await transport.stream('测试', undefined);
++    const chunks = [];
++    for await (const chunk of upstream.response.body) chunks.push(chunk);
++    assert.equal(Buffer.concat(chunks).length, 16);
++    assert.ok(calls.some(([command]) => command.endsWith('afconvert')));
++    upstream.release();
++  } finally {
++    await rm(root, { recursive: true, force: true });
++  }
++});

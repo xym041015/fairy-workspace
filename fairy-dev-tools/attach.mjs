@@ -1,0 +1,20 @@
+import fs from 'node:fs';
+const PORT = process.env.CDP_PORT || '9334';
+const BASE = 'http://127.0.0.1:' + PORT;
+const list = await (await fetch(BASE + '/json/list')).json();
+const t = list.find((x) => x.type === 'page');
+const sock = new WebSocket(t.webSocketDebuggerUrl);
+let id = 0; const pending = new Map();
+sock.addEventListener('message', (ev) => { const m = JSON.parse(ev.data); if (m.id && pending.has(m.id)) { const p = pending.get(m.id); pending.delete(m.id); m.error ? p.rej(new Error(JSON.stringify(m.error))) : p.res(m.result); } });
+await new Promise((r) => sock.addEventListener('open', r));
+const send = (method, params = {}) => { const mid = ++id; return new Promise((res, rej) => { pending.set(mid, { res, rej }); sock.send(JSON.stringify({ id: mid, method, params })); }); };
+await send('DOM.enable');
+await send('Runtime.enable');
+const file = process.argv[2];
+const { root } = await send('DOM.getDocument', { depth: -1 });
+const { nodeId } = await send('DOM.querySelector', { nodeId: root.nodeId, selector: 'input[type="file"]' });
+if (!nodeId) { console.log(JSON.stringify({ error: 'no file input' })); process.exit(1); }
+await send('DOM.setFileInputFiles', { files: [file], nodeId });
+console.log(JSON.stringify({ ok: true, file }));
+await new Promise((r) => setTimeout(r, 3000));
+process.exit(0);

@@ -1,0 +1,43 @@
+{
+  "name": "dsh-profile-web",
+  "private": true,
+  "dependencies": {
+    "@dsh-external/dsh-super-injector": "link:/Users/xuzhouping/.dsh/plugins/dsh-super-injector",
+    "@linxin666/dsh-client-ui-skill-explorer": "0.4.4",
+    "@linxin666/dsh-client-ui-web-ui-settings": "0.4.4",
+    "@linxin666/dsh-remote-web-ui": "0.4.4",
+    "@linxin666/dsh-web-all": "0.4.4",
+    "@nanmicoder/dsh-agent-teams": "0.1.22",
+    "@playwright/mcp": "0.0.82",
+    "@tt-a1i/archify-dsh": "^0.1.0",
+    "@upstash/context7-mcp": "4.0.2",
+    "@vectorize-io/hindsight-coding-agents": "^0.6.1",
+    "@y1x1n/dsh-prompt-optimizer": "link:/Users/xuzhouping/.dsh/plugins/dsh-prompt-optimizer",
+    "dsh-balance-meter": "link:/Users/xuzhouping/Desktop/开发者/fairy deepseek开发/Fairy-DSH/balance-meter/dsh-balance-meter",
+    "dsh-browser-dock": "link:/Users/xuzhouping/Desktop/开发者/fairy deepseek开发/Fairy-DSH/browser-dock/dsh-browser-dock",
+    "dsh-fairy-startup": "link:/Users/xuzhouping/Desktop/开发者/fairy deepseek开发/Fairy-DSH/fairy-startup/dsh-fairy-startup",
+    "dsh-fairy-visual": "link:/Users/xuzhouping/Desktop/开发者/fairy deepseek开发/Fairy-DSH/fairy-visual/dsh-fairy-visual",
+    "dsh-fairy-voice": "link:/Users/xuzhouping/Desktop/开发者/fairy deepseek开发/Fairy-DSH/fairy-voice/dsh-fairy-voice",
+    "dsh-pocket": "^2.10.6",
+    "dsh-whale-widget": "link:/Users/xuzhouping/.dsh/plugins/dsh-whale-widget",
+    "dsh-worktable": "https://github.com/Aisland-SJL/dsh-worktable/releases/latest/download/dsh-worktable.tgz",
+    "dshmarket": "^1.66.8"
+  },
+  "dsh": {
+    "profile": {
+      "bundles": [
+        "@deepseek-ai/dsh-base",
+        "@deepseek-ai/dsh-web-app",
+        "dshmarket",
+        "@nanmicoder/dsh-agent-teams",
+        "@tt-a1i/archify-dsh",
+        "dsh-pocket",
+        "@vectorize-io/hindsight-coding-agents",
+        "dsh-whale-widget",
+        "@linxin666/dsh-client-ui-web-ui-settings",
+        "@y1x1n/dsh-prompt-optimizer",
+        "dsh-worktable"
+      ]
+    }
+  }
+}

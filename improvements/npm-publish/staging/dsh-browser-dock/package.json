@@ -1,0 +1,40 @@
+{
+  "name": "dsh-browser-dock",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-slots",
+        "@deepseek-ai/dsh-client-ui-layout"
+      ]
+    }
+  },
+  "dependencies": {
+    "dsh-fairy-contracts": "^0.1.0"
+  },
+  "devDependencies": {
+    "tsdown": "^0.22.14"
+  },
+  "scripts": {
+    "bundle": "tsdown && cp lib/index.iife.js lib/client.js.tmp && mv -f lib/client.js.tmp lib/client.js && cp src/index.js lib/index.js.tmp && mv -f lib/index.js.tmp lib/index.js",
+    "test": "node --test test/*.test.js"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "lib",
+    "src",
+    "proxy.cjs",
+    "proxy.cjs"
+  ]
+}
